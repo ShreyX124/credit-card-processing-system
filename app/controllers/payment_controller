@@ -1,0 +1,353 @@
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
+from flask_login import login_required, current_user
+from app import db
+from app.models.user import User, Card
+from app.models.merchant import Merchant
+from app.models.transaction import Transaction, Dispute
+from app.services.payment_gateway import PaymentGateway
+from app.utils.encryption import encrypt_data, mask_card_number
+from app.utils.validators import validate_card_number, validate_expiry_date, validate_cvv, get_card_type
+from datetime import datetime
+import uuid
+
+payment_bp = Blueprint('payment', __name__)
+
+@payment_bp.route('/')
+def home():
+    if current_user.is_authenticated:
+        return redirect(url_for('payment.dashboard'))
+    return render_template('index.html')
+
+@payment_bp.route('/dashboard')
+@login_required
+def dashboard():
+    if current_user.is_merchant():
+        return redirect(url_for('payment.merchant_dashboard'))
+    
+    # Get user's cards
+    cards = Card.query.filter_by(user_id=current_user.id, is_active=True).all()
+    
+    # Get recent transactions
+    transactions = Transaction.query.filter_by(user_id=current_user.id)\
+        .order_by(Transaction.created_at.desc())\
+        .limit(10).all()
+    
+    return render_template('payment/dashboard.html', cards=cards, transactions=transactions)
+
+@payment_bp.route('/merchant/dashboard')
+@login_required
+def merchant_dashboard():
+    if not current_user.is_merchant():
+        return redirect(url_for('payment.dashboard'))
+    
+    # Get merchant profile
+    merchant = Merchant.query.filter_by(user_id=current_user.id).first()
+    
+    if not merchant:
+        flash('Merchant profile not found', 'danger')
+        return redirect(url_for('payment.dashboard'))
+    
+    # Get recent transactions
+    transactions = Transaction.query.filter_by(merchant_id=merchant.id)\
+        .order_by(Transaction.created_at.desc())\
+        .limit(10).all()
+    
+    # Calculate summary statistics
+    total_sales = db.session.query(db.func.sum(Transaction.amount))\
+        .filter(Transaction.merchant_id == merchant.id, Transaction.status == 'completed').scalar() or 0
+    
+    transaction_count = Transaction.query.filter_by(merchant_id=merchant.id, status='completed').count()
+    
+    return render_template('payment/merchant_dashboard.html', 
+                          merchant=merchant, 
+                          transactions=transactions, 
+                          total_sales=total_sales,
+                          transaction_count=transaction_count)
+
+@payment_bp.route('/cards')
+@login_required
+def cards():
+    if current_user.is_merchant():
+        return redirect(url_for('payment.merchant_dashboard'))
+    
+    # Get user's cards
+    cards = Card.query.filter_by(user_id=current_user.id).all()
+    
+    return render_template('payment/cards.html', cards=cards)
+
+@payment_bp.route('/cards/add', methods=['GET', 'POST'])
+@login_required
+def add_card():
+    if current_user.is_merchant():
+        return redirect(url_for('payment.merchant_dashboard'))
+    
+    if request.method == 'POST':
+        card_number = request.form.get('card_number').replace(' ', '').replace('-', '')
+        card_holder_name = request.form.get('card_holder_name')
+        expiry_month = int(request.form.get('expiry_month'))
+        expiry_year = int(request.form.get('expiry_year'))
+        cvv = request.form.get('cvv')
+        
+        # Validate card details
+        if not validate_card_number(card_number):
+            flash('Invalid card number', 'danger')
+            return render_template('payment/add_card.html')
+        
+        if not validate_expiry_date(expiry_month, expiry_year):
+            flash('Card has expired', 'danger')
+            return render_template('payment/add_card.html')
+        
+        if not validate_cvv(cvv):
+            flash('Invalid CVV', 'danger')
+            return render_template('payment/add_card.html')
+        
+        # Determine card type
+        card_type = get_card_type(card_number)
+        
+        # Check if card already exists
+        existing_card = Card.query.filter_by(user_id=current_user.id, last_four=card_number[-4:]).first()
+        if existing_card:
+            flash('This card is already saved to your account', 'warning')
+            return redirect(url_for('payment.cards'))
+        
+        # Create new card
+        card = Card(
+            id=str(uuid.uuid4()),
+            user_id=current_user.id,
+            card_number_hash=encrypt_data(card_number),
+            card_holder_name=card_holder_name,
+            expiry_month=expiry_month,
+            expiry_year=expiry_year,
+            card_type=card_type,
+            is_default=False,
+            last_four=card_number[-4:]
+        )
+        
+        # If this is the first card, set it as default
+        if Card.query.filter_by(user_id=current_user.id).count() == 0:
+            card.is_default = True
+        
+        try:
+            db.session.add(card)
+            db.session.commit()
+            flash('Card added successfully', 'success')
+            return redirect(url_for('payment.cards'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error adding card: {str(e)}', 'danger')
+    
+    return render_template('payment/add_card.html')
+
+@payment_bp.route('/cards/delete/<card_id>', methods=['POST'])
+@login_required
+def delete_card(card_id):
+    card = Card.query.filter_by(id=card_id, user_id=current_user.id).first()
+    
+    if not card:
+        flash('Card not found', 'danger')
+        return redirect(url_for('payment.cards'))
+    
+    # Check if this is the default card
+    if card.is_default:
+        # Find another card to set as default
+        other_card = Card.query.filter_by(user_id=current_user.id, is_active=True).filter(Card.id != card_id).first()
+        if other_card:
+            other_card.is_default = True
+        else:
+            flash('Cannot delete the only card on your account', 'danger')
+            return redirect(url_for('payment.cards'))
+    
+    # Soft delete the card
+    card.is_active = False
+    
+    try:
+        db.session.commit()
+        flash('Card removed successfully', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error removing card: {str(e)}', 'danger')
+    
+    return redirect(url_for('payment.cards'))
+
+@payment_bp.route('/cards/default/<card_id>', methods=['POST'])
+@login_required
+def set_default_card(card_id):
+    card = Card.query.filter_by(id=card_id, user_id=current_user.id, is_active=True).first()
+    
+    if not card:
+        flash('Card not found', 'danger')
+        return redirect(url_for('payment.cards'))
+    
+    # Clear default flag on all user's cards
+    for user_card in Card.query.filter_by(user_id=current_user.id, is_active=True).all():
+        user_card.is_default = False
+    
+    # Set this card as default
+    card.is_default = True
+    
+    try:
+        db.session.commit()
+        flash('Default card updated successfully', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error updating default card: {str(e)}', 'danger')
+    
+    return redirect(url_for('payment.cards'))
+
+@payment_bp.route('/transactions')
+@login_required
+def transactions():
+    if current_user.is_merchant():
+        # Get merchant profile
+        merchant = Merchant.query.filter_by(user_id=current_user.id).first()
+        if not merchant:
+            flash('Merchant profile not found', 'danger')
+            return redirect(url_for('payment.dashboard'))
+        
+        # Get transactions for this merchant
+        transactions = Transaction.query.filter_by(merchant_id=merchant.id)\
+            .order_by(Transaction.created_at.desc()).all()
+        
+        return render_template('payment/merchant_transactions.html', transactions=transactions)
+    else:
+        # Get user's transactions
+        transactions = Transaction.query.filter_by(user_id=current_user.id)\
+            .order_by(Transaction.created_at.desc()).all()
+        
+        return render_template('payment/transactions.html', transactions=transactions)
+
+@payment_bp.route('/transaction/<transaction_id>')
+@login_required
+def transaction_details(transaction_id):
+    transaction = Transaction.query.get(transaction_id)
+    
+    if not transaction:
+        flash('Transaction not found', 'danger')
+        return redirect(url_for('payment.transactions'))
+    
+    # Check if user has permission to view this transaction
+    if current_user.role == 'customer' and transaction.user_id != current_user.id:
+        flash('You do not have permission to view this transaction', 'danger')
+        return redirect(url_for('payment.transactions'))
+    
+    if current_user.role == 'merchant':
+        merchant = Merchant.query.filter_by(user_id=current_user.id).first()
+        if not merchant or transaction.merchant_id != merchant.id:
+            flash('You do not have permission to view this transaction', 'danger')
+            return redirect(url_for('payment.transactions'))
+    
+    # Get dispute information if exists
+    dispute = Dispute.query.filter_by(transaction_id=transaction_id).first()
+    
+    # Get card information
+    card = Card.query.get(transaction.card_id)
+    
+    # Get merchant information
+    merchant = Merchant.query.get(transaction.merchant_id)
+    
+    return render_template('payment/transaction_details.html', 
+                          transaction=transaction, 
+                          dispute=dispute,
+                          card=card,
+                          merchant=merchant)
+
+@payment_bp.route('/disputes/create/<transaction_id>', methods=['GET', 'POST'])
+@login_required
+def create_dispute(transaction_id):
+    transaction = Transaction.query.get(transaction_id)
+    
+    if not transaction:
+        flash('Transaction not found', 'danger')
+        return redirect(url_for('payment.transactions'))
+    
+    # Check if user has permission to dispute this transaction
+    if transaction.user_id != current_user.id:
+        flash('You do not have permission to dispute this transaction', 'danger')
+        return redirect(url_for('payment.transactions'))
+    
+    # Check if transaction is eligible for dispute
+    if transaction.status != 'completed':
+        flash('Only completed transactions can be disputed', 'danger')
+        return redirect(url_for('payment.transaction_details', transaction_id=transaction_id))
+    
+    # Check if there's already a dispute
+    existing_dispute = Dispute.query.filter_by(transaction_id=transaction_id).first()
+    if existing_dispute:
+        flash('A dispute already exists for this transaction', 'warning')
+        return redirect(url_for('payment.transaction_details', transaction_id=transaction_id))
+    
+    if request.method == 'POST':
+        reason = request.form.get('reason')
+        description = request.form.get('description')
+        
+        if not reason or not description:
+            flash('Reason and description are required', 'danger')
+            return render_template('payment/create_dispute.html', transaction=transaction)
+        
+        # Create new dispute
+        dispute = Dispute(
+            id=str(uuid.uuid4()),
+            transaction_id=transaction_id,
+            user_id=current_user.id,
+            reason=reason,
+            description=description
+        )
+        
+        try:
+            db.session.add(dispute)
+            db.session.commit()
+            flash('Dispute created successfully', 'success')
+            return redirect(url_for('payment.transaction_details', transaction_id=transaction_id))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error creating dispute: {str(e)}', 'danger')
+    
+    return render_template('payment/create_dispute.html', transaction=transaction)
+
+@payment_bp.route('/make_payment', methods=['GET', 'POST'])
+@login_required
+def make_payment():
+    if current_user.is_merchant():
+        return redirect(url_for('payment.merchant_dashboard'))
+    
+    # Get user's active cards
+    cards = Card.query.filter_by(user_id=current_user.id, is_active=True).all()
+    
+    if not cards:
+        flash('You need to add a card before making a payment', 'warning')
+        return redirect(url_for('payment.add_card'))
+    
+    # Get merchants for demo
+    merchants = Merchant.query.filter_by(is_verified=True, is_active=True).all()
+    
+    if request.method == 'POST':
+        merchant_id = request.form.get('merchant_id')
+        card_id = request.form.get('card_id')
+        amount = float(request.form.get('amount'))
+        description = request.form.get('description', 'Payment')
+        
+        if not merchant_id or not card_id or not amount:
+            flash('All fields are required', 'danger')
+            return render_template('payment/make_payment.html', cards=cards, merchants=merchants)
+        
+        if amount <= 0:
+            flash('Amount must be greater than zero', 'danger')
+            return render_template('payment/make_payment.html', cards=cards, merchants=merchants)
+        
+        # Process payment
+        result = PaymentGateway.process_payment(
+            user_id=current_user.id,
+            merchant_id=merchant_id,
+            card_id=card_id,
+            amount=amount,
+            description=description
+        )
+        
+        if result['success']:
+            flash('Payment processed successfully', 'success')
+            return redirect(url_for('payment.transaction_details', transaction_id=result['reference']))
+        else:
+            flash(f'Payment failed: {result["message"]}', 'danger')
+            return render_template('payment/make_payment.html', cards=cards, merchants=merchants)
+    
+    return render_template('payment/make_payment.html', cards=cards, merchants=merchants)

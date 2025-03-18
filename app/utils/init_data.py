@@ -50,3 +50,46 @@ def create_initial_data():
         business_name='Example Store',
         business_address='123 Main St, Anytown, USA',
         business_phone='555-123-4567',
+        business_email='store@example.com',
+        business_website='www.examplestore.com',
+        business_description='A sample merchant store for demonstration purposes',
+        api_key=secrets.token_hex(16),
+        api_secret=secrets.token_hex(32),
+        is_verified=True,
+        verification_date=datetime.utcnow(),
+        is_active=True
+    )
+    db.session.add(merchant)
+    
+    # Create a customer user
+    customer = User(
+        id=str(uuid.uuid4()),
+        email='customer@example.com',
+        username='customer',
+        first_name='John',
+        last_name='Doe',
+        role='customer',
+        is_active=True
+    )
+    customer.set_password('customer123')
+    db.session.add(customer)
+    
+    # Create a sample card for the customer
+    card = Card(
+        id=str(uuid.uuid4()),
+        user_id=customer.id,
+        card_number_hash=encrypt_data('4111111111111111'),
+        card_holder_name='John Doe',
+        expiry_month=12,
+        expiry_year=2025,
+        card_type='visa',
+        is_default=True,
+        is_active=True,
+        last_four='1111'
+    )
+    db.session.add(card)
+    
+    # Commit the changes
+    db.session.commit()
+    
+    print("Demo data created successfully")
