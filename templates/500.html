@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Server Error - Credit Card Processing System{% endblock %}
+
+{% block content %}
+<div class="error-container">
+    <div class="error-code">500</div>
+    <h1>Server Error</h1>
+    <p>Something went wrong on our end. Please try again later.</p>
+    <a href="/" class="btn btn-primary">Go to Homepage</a>
+</div>
+
+<style>
+    .error-container {
+        text-align: center;
+        padding: 100px 20px;
+    }
+    
+    .error-code {
+        font-size: 120px;
+        font-weight: bold;
+        color: #e74c3c;
+        margin-bottom: 20px;
+    }
+    
+    .error-container h1 {
+        margin-bottom: 20px;
+        font-size: 32px;
+    }
+    
+    .error-container p {
+        margin-bottom: 30px;
+        font-size: 18px;
+        color: #7f8c8d;
+    }
+</style>
+{% endblock %}

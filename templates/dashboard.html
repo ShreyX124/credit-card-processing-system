@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Credit Card Processing System{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="dashboard-header">
+        <h1>Welcome, {{ user.name }}!</h1>
+        <p>Account type: {{ user.role }}</p>
+    </div>
+
+    <div class="dashboard-stats">
+        <div class="stat-card">
+            <h3>Total Transactions</h3>
+            <div class="stat-value">{{ stats.total_transactions }}</div>
+        </div>
+        <div class="stat-card">
+            <h3>Total Amount</h3>
+            <div class="stat-value">{{ stats.total_amount }} {{ stats.currency }}</div>
+        </div>
+        <div class="stat-card">
+            <h3>Success Rate</h3>
+            <div class="stat-value">{{ stats.success_rate }}%</div>
+        </div>
+    </div>
+
+    <div class="dashboard-actions">
+        <a href="/transactions/new" class="btn btn-primary">New Transaction</a>
+        <a href="/transactions" class="btn btn-secondary">View Transactions</a>
+        {% if user.role == 'admin' %}
+        <a href="/admin" class="btn btn-info">Admin Panel</a>
+        {% endif %}
+    </div>
+
+    <div class="recent-transactions">
+        <h2>Recent Transactions</h2>
+        {% if transactions %}
+        <table class="transactions-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Merchant</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for transaction in transactions %}
+                <tr>
+                    <td>{{ transaction.id[:8] }}...</td>
+                    <td>{{ transaction.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{{ transaction.amount }} {{ transaction.currency }}</td>
+                    <td>{{ transaction.merchant_name }}</td>
+                    <td><span class="status-badge status-{{ transaction.status }}">{{ transaction.status }}</span></td>
+                    <td>
+                        <a href="/transactions/{{ transaction.id }}" class="btn btn-sm btn-info">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No recent transactions found.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

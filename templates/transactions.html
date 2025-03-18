@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}Transactions - Credit Card Processing System{% endblock %}
+
+{% block content %}
+<div class="transactions-container">
+    <div class="transactions-header">
+        <h1>All Transactions</h1>
+        <div class="actions">
+            <a href="/transactions/new" class="btn btn-primary">New Transaction</a>
+            <a href="/dashboard" class="btn btn-secondary">Back to Dashboard</a>
+        </div>
+    </div>
+    
+    <div class="filter-section">
+        <div class="filter-form">
+            <div class="form-group">
+                <label for="status-filter">Status</label>
+                <select id="status-filter">
+                    <option value="all">All</option>
+                    <option value="pending">Pending</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                    <option value="refunded">Refunded</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="date-filter">Date Range</label>
+                <select id="date-filter">
+                    <option value="all">All Time</option>
+                    <option value="today">Today</option>
+                    <option value="week">This Week</option>
+                    <option value="month">This Month</option>
+                    <option value="year">This Year</option>
+                </select>
+            </div>
+            <button id="apply-filters" class="btn btn-info btn-sm">Apply Filters</button>
+        </div>
+    </div>
+    
+    <div class="transactions-table-container">
+        {% if transactions %}
+        <table class="transactions-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Merchant</th>
+                    <th>Description</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="transactions-table-body">
+                {% for transaction in transactions %}
+                <tr data-status="{{ transaction.status }}">
+                    <td>{{ transaction.id[:8] }}...</td>
+                    <td>{{ transaction.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{{ transaction.amount }} {{ transaction.currency }}</td>
+                    <td>{{ transaction.merchant_name }}</td>
+                    <td>{{ transaction.description }}</td>
+                    <td><span class="status-badge status-{{ transaction.status }}">{{ transaction.status }}</span></td>
+                    <td>
+                        <a href="/transactions/{{ transaction.id }}" class="btn btn-sm btn-info">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>No transactions found</p>
+            <a href="/transactions/new" class="btn btn-primary">Create Your First Transaction</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<style>
+    .transactions-container {
+        padding: 20px;
+    }
+    
+    .transactions-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+    
+    .actions {
+        display: flex;
+        gap: 10px;
+    }
+    
+    .filter-section {
+        background-color: white;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+    }
+    
+    .filter-form {
+        display: flex;
+        align-items: flex-end;
+        gap: 15px;
+    }
+    
+    .filter-form .form-group {
+        margin-bottom: 0;
+        flex: 1;
+    }
+    
+    .transactions-table-container {
+        background-color: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        overflow-x: auto;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 40px 20px;
+    }
+    
+    .empty-state p {
+        margin-bottom: 20px;
+        font-size: 18px;
+        color: #7f8c8d;
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const statusFilter = document.getElementById('status-filter');
+    const dateFilter = document.getElementById('date-filter');
+    const applyFiltersBtn = document.getElementById('apply-filters');
+    const tableBody = document.getElementById('transactions-table-body');
+    const rows = tableBody.querySelectorAll('tr');
+    
+    applyFiltersBtn.addEventListener('click', function() {
+        const statusValue = statusFilter.value;
+        
+        // Filter by status
+        rows.forEach(row => {
+            const rowStatus = row.dataset.status;
+            
+            if (statusValue === 'all' || rowStatus === statusValue) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+        
+        // Date filtering would require more complex logic with actual dates
+        // For now, we're just demonstrating the UI
+    });
+});
+</script>
+{% endblock %}

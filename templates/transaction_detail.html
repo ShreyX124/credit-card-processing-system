@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Transaction Details - Credit Card Processing System{% endblock %}
+
+{% block content %}
+<div class="transaction-detail-container">
+    <div class="back-link">
+        <a href="/dashboard">&larr; Back to Dashboard</a>
+    </div>
+    
+    <div class="transaction-header">
+        <h1>Transaction Details</h1>
+        <span class="status-badge status-{{ transaction.status }}">{{ transaction.status }}</span>
+    </div>
+    
+    <div class="transaction-info">
+        <div class="info-section">
+            <h2>Transaction Information</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Transaction ID:</span>
+                    <span class="info-value">{{ transaction.id }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Date:</span>
+                    <span class="info-value">{{ transaction.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Amount:</span>
+                    <span class="info-value">{{ transaction.amount }} {{ transaction.currency }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Merchant:</span>
+                    <span class="info-value">{{ transaction.merchant_name }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Description:</span>
+                    <span class="info-value">{{ transaction.description }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Status:</span>
+                    <span class="info-value">{{ transaction.status }}</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="info-section">
+            <h2>Payment Information</h2>
+            {% if payment %}
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Payment ID:</span>
+                    <span class="info-value">{{ payment.id }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Payment Method:</span>
+                    <span class="info-value">{{ payment.payment_method }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Payment Date:</span>
+                    <span class="info-value">{{ payment.payment_date.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Card Number:</span>
+                    <span class="info-value">XXXX-XXXX-XXXX-{{ payment.get_card_number()[-4:] }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Status:</span>
+                    <span class="info-value status-badge status-{{ payment.status }}">{{ payment.status }}</span>
+                </div>
+                {% if payment.refund_id %}
+                <div class="info-item">
+                    <span class="info-label">Refund ID:</span>
+                    <span class="info-value">{{ payment.refund_id }}</span>
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <p>No payment information available for this transaction.</p>
+            {% endif %}
+        </div>
+        
+        <div class="info-section">
+            <h2>Fraud Detection Results</h2>
+            {% if fraud_check %}
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Risk Score:</span>
+                    <span class="info-value">{{ fraud_check.risk_score }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Decision:</span>
+                    <span class="info-value">{{ fraud_check.decision }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Triggered Rules:</span>
+                    <span class="info-value">{{ fraud_check.triggered_rules|join(", ") }}</span>
+                </div>
+            </div>
+            {% else %}
+            <p>No fraud detection information available for this transaction.</p>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="transaction-actions">
+        {% if transaction.status == 'pending' %}
+        <button class="btn btn-success" onclick="processTransaction('{{ transaction.id }}')">Process Transaction</button>
+        <button class="btn btn-danger" onclick="cancelTransaction('{{ transaction.id }}')">Cancel Transaction</button>
+        {% elif transaction.status == 'completed' and payment and payment.status == 'completed' %}
+        <button class="btn btn-warning" onclick="refundTransaction('{{ transaction.id }}')">Process Refund</button>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function processTransaction(transactionId) {
+    if (confirm('Are you sure you want to process this transaction?')) {
+        fetch(`/api/transactions/${transactionId}/process`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Transaction processed successfully!');
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('Error processing transaction: ' + error);
+        });
+    }
+}
+
+function cancelTransaction(transactionId) {
+    if (confirm('Are you sure you want to cancel this transaction?')) {
+        fetch(`/api/transactions/${transactionId}/cancel`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Transaction cancelled successfully!');
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('Error cancelling transaction: ' + error);
+        });
+    }
+}
+
+function refundTransaction(transactionId) {
+    if (confirm('Are you sure you want to refund this transaction?')) {
+        fetch(`/api/transactions/${transactionId}/refund`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Refund processed successfully!');
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('Error processing refund: ' + error);
+        });
+    }
+}
+</script>
+{% endblock %}
